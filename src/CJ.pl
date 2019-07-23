@@ -27,7 +27,7 @@ use JSON::PP;
 #use Term::ANSIColor qw(:constants); # for changing terminal text colors
 #use Term::ReadKey;
 
-use vars qw( $user_submit_defaults $submit_defaults $qSubmitDefault $sync_status $message $dep_folder $verbose $log_script $text_header_lines $show_tag $log_tag $force_tag $qsub_extra $cmdline $sanity_expand);  # options
+use vars qw( $user_submit_defaults $submit_defaults $qSubmitDefault $sync_status $message $dep_folder $verbose $log_script $text_header_lines $show_tag $log_tag $force_tag $qsub_extra $cmdline $sanity_expand $send);  # options
 
 
 $::VERSION = &CJ::version_info();
@@ -58,6 +58,7 @@ if( (!-d "$info_dir" || !defined($AgentID)) & ($cjcmd0 ne "init") ){
 $message           = "";
 $dep_folder        = undef;
 $verbose           = 0;         # default - redirect to CJlog
+$send           = 0;         # default
 $text_header_lines = undef;
 $show_tag          = "program";
 $qsub_extra        = "";
@@ -121,6 +122,8 @@ my $spec = <<'EOSPEC';
      -v 	          [ditto] [undocumented]
      --v[erbose]	                                  verbose mode [nocase]
                                                               {$verbose=1}
+     --s[end]	                                  upload after experiment is finished [nocase]
+                                                              {$send=1}
      -vv[v[v[v]]]	                                      [ditto] [undocumented]
      --clean      	                                  show cleaned packages in log [nocase]  [requires: log]
                                                                {$log_tag="showclean";}
@@ -143,8 +146,6 @@ my $spec = <<'EOSPEC';
      --header [=]  <num_lines:+i>	                  number of header lines for reducing text files [requires: reduce]
                                                                {$text_header_lines=$num_lines;}
      --update                                         	  updates accordingly [requires: config]
-
-
      -alloc[ate]   <resources>	                          machine specific allocation [nocase]
                                                                 {$qsub_extra=$resources}
      -dep          <dep_path>		                  dependency folder path [nocase]
@@ -155,7 +156,6 @@ my $spec = <<'EOSPEC';
                                                                 {$user_submit_defaults->{'mem'}=$memory}
      -runtime [=]     <r_time>	                          run time requested (default=48:00:00) [nocase]
   	                                                          {$user_submit_defaults->{'runtime'}=$r_time}
-
      avail         <tag> 		                  list available resources <tag> = cluster|app
 								  { defer{ &CJ::avail($tag) } }
      access        [<pid>]	                          Go to the package on the remote cluster
@@ -207,16 +207,16 @@ my $spec = <<'EOSPEC';
                                                                  {defer{ &CJ::add_cmd($cmdline);&CJ::show($pid,$counter,$file,"less") }}
      rerun          [<pid> [[/] [<counter>...]]]	          rerun certain (failed) job [nocase]
                                                                  {defer{&CJ::add_cmd($cmdline);
-								  &CJ::rerun($pid,\@counter,$submit_defaults,$qSubmitDefault,$user_submit_defaults,$qsub_extra,$verbose) }}
-     run            <code> <cluster>	                  run code on the cluster [nocase] [requires: -m]
+                                                                  &CJ::rerun($pid,\@counter,$submit_defaults,$qSubmitDefault,$user_submit_defaults,$qsub_extra,$verbose) }}
+     run            <code> <cluster>		                  run code on the cluster [nocase] [requires: -m]
                                                                  {my $runflag = "run";
                                                                {defer{&CJ::add_cmd($cmdline); run($cluster,$code,$runflag,$qsub_extra)}}
                                                                  }
-     pardeploy      <code> <cluster>	                  pardeploy code on the cluster [nocase] [requires: -m]
+     pardeploy      <code> <cluster>		                  pardeploy code on the cluster [nocase] [requires: -m]
                                                                {my $runflag = "pardeploy";
                                                                 {defer{&CJ::add_cmd($cmdline);run($cluster,$code,$runflag,$qsub_extra)}}
                                                                }
-     parrun         <code> <cluster>	                  parrun code on the cluster [nocase] [requires: -m]
+     parrun         [<code>] [<cluster>]		                  parrun code on the cluster [nocase] [requires: -m]
                                                                 {my $runflag = "parrun";
                                                                 {defer{&CJ::add_cmd($cmdline);run($cluster,$code,$runflag,$qsub_extra)}}
                                                                 }
@@ -229,6 +229,7 @@ my $spec = <<'EOSPEC';
                                                                 {defer{ &CJ::add_cmd($cmdline);&CJ::show($pid,$counter,"","runlog") }}
      sanity        <type>  [<pid>]			          sanity checks:  exist | line [nocase]
      save          <pid> [<path>]	                  save a package in path [nocase]
+                                                                {defer{&CJ::add_cmd($cmdline);  &CJ::save_results($pid,$path,$verbose)}}
      send          [<pid>]	                          Send code and results from server to gcloud [nocase]
                                                               {defer{&CJ::add_cmd($cmdline);send_package($pid)}}
      share         <pid> <shared_with>		          Share package with another user [nocase]
@@ -251,7 +252,6 @@ my $spec = <<'EOSPEC';
 EOSPEC
 
 my $opts = Getopt::Declare->new($spec);
-
 
 
 
@@ -465,9 +465,8 @@ sub receive_package{
 sub run{
     
     my ($machine,$program, $runflag,$qsub_extra) = @_;	
-
     my $BASE = `pwd`;chomp($BASE);   # Base is where program lives!
-    my $run = CJ::Run->new($BASE,$program,$machine,$runflag,$dep_folder,$message,$qsub_extra,$qSubmitDefault,$submit_defaults,$user_submit_defaults,$verbose,$CJID);
+    my $run = CJ::Run->new($BASE,$program,$machine,$runflag,$dep_folder,$message,$qsub_extra,$qSubmitDefault,$submit_defaults,$user_submit_defaults,$verbose,$CJID, $send);
 
     if ($runflag eq "deploy" || $runflag eq "run"){
         $run->SERIAL_DEPLOY_RUN();

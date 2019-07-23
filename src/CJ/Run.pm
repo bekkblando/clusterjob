@@ -17,7 +17,7 @@ use Digest::SHA qw(sha1_hex); # generate hexa-decimal SHA1 PID
 sub new {
 ####################
  	my $class= shift;
- 	my ($path,$program,$machine, $runflag,$dep_folder,$message, $qsub_extra, $qSubmitDefault, $submit_defaults, $user_submit_defaults, $verbose, $cj_id) = @_;
+ 	my ($path,$program,$machine, $runflag,$dep_folder,$message, $qsub_extra, $qSubmitDefault, $submit_defaults, $user_submit_defaults, $verbose, $cj_id, $send) = @_;
 	
 	my $self = bless {
 		path    => $path,
@@ -31,7 +31,8 @@ sub new {
         submit_defaults => $submit_defaults,
         user_submit_defaults => $user_submit_defaults,
         message => $message,
-        cj_id => $cj_id
+        cj_id => $cj_id,
+        send => $send
 	}, $class;
     
     $self->_update_qsub_extra();
@@ -152,13 +153,17 @@ if(-d $localPrefix){
     mkdir "$local_sep_Dir" unless (-d $local_sep_Dir);
 }
 
+my $cj_hub = CJ::Hub->new();
 # Install stuff for CJ Hub in the background FIXME: Ask if this should go here
-CJ::Hub->new()->setup($self->{machine});
+$cj_hub->setup($self->{machine});
+if($self->{send}){
+    $cj_hub->create_deamon();
+}
+
 
 # cp code
 my $cmd = "cp $self->{path}/$self->{program} $local_sep_Dir/";
 # FIXME: Get metadata of ExpRaw
-&CJ::message("Meta Data For EXP RAW $local_sep_Dir\n\n\n");
 &CJ::my_system($cmd,$self->{verbose});
 # cp dependencies
 $cmd   = "cp -r $self->{dep_folder}/* $local_sep_Dir/" unless not defined($self->{dep_folder});
